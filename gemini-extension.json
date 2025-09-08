@@ -1,0 +1,10 @@
+{
+  "name": "my-extension",
+  "version": "1.0.0",
+  "mcpServers": {
+    "devops": {
+      "command": "./docker-start.sh",
+      "timeout": 150000
+    }
+  }
+}

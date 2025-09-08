@@ -1,9 +1,19 @@
 {
-  "name": "my-extension",
+  "name": "gcp-cicd-extention",
   "version": "1.0.0",
   "mcpServers": {
     "devops": {
-      "command": "./docker-start.sh",
+      "command": "docker",
+      "args": [
+        "run",
+        "--rm",
+        "-i",
+        "-v",
+        "$HOME/.config/gcloud:/root/.config/gcloud",
+        "-e",
+        "GOOGLE_APPLICATION_CREDENTIALS=/root/.config/gcloud/application_default_credentials.json",
+        "us-central1-docker.pkg.dev/haroonc-exp/hackaton/devops-mcp-server:latest"
+      ],
       "timeout": 150000
     }
   }

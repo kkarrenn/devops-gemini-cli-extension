@@ -1,0 +1,4 @@
+google-cloud-aiplatform>=1.111.0
+beautifulsoup4
+pypandoc
+lxml

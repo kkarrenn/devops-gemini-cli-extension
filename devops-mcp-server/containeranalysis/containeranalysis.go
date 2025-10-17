@@ -41,7 +41,7 @@ func NewClient(ctx context.Context) (*Client, error) {
 func (c *Client) ListVulnerabilities(ctx context.Context, projectID, resourceURL string) ([]*grafeaspb.Occurrence, error) {
 	req := &grafeaspb.ListOccurrencesRequest{
 		Parent: fmt.Sprintf("projects/%s", projectID),
-		Filter: fmt.Sprintf("resourceUrl=\"%%s\" AND kind=\"VULNERABILITY\"", resourceURL),
+		Filter: fmt.Sprintf("resourceUrl=\"%s\" AND kind=\"VULNERABILITY\"", resourceURL),
 	}
 	it := c.client.GetGrafeasClient().ListOccurrences(ctx, req)
 	var vulnerabilities []*grafeaspb.Occurrence

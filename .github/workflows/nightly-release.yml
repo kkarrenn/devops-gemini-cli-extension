@@ -1,0 +1,60 @@
+name: Nightly Release
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # Runs daily at midnight UTC
+  workflow_dispatch: # Allows manual triggering of the workflow
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: devops-mcp-server
+    strategy:
+      matrix:
+        goos: [linux, windows, darwin]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v3
+        with:
+          go-version: '1.24'
+      
+      - name: Run Go Vet
+        run: go vet ./...
+
+      - name: Run Go Fmt
+        run: go fmt ./...
+
+      - name: Run Go Tests
+        run: go test ./...
+
+      - name: Install golangci-lint
+        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+
+      - name: Run golangci-lint
+        run: golangci-lint run
+
+      - name: Build
+        run: |
+          export GOOS=${{ matrix.goos }}
+          export GOARCH=${{ matrix.goarch }}
+          go build -o "release/devops-mcp-server-${{ matrix.goos }}-${{ matrix.goarch }}" ./devops-mcp-server
+
+      - name: Create release assets
+        run: |
+          tar -czvf "release/devops-mcp-server-${{ matrix.goos }}-${{ matrix.goarch }}.tar.gz" -C release "devops-mcp-server-${{ matrix.goos }}-${{ matrix.goarch }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: release/*.tar.gz

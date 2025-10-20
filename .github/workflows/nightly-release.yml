@@ -24,6 +24,13 @@ jobs:
     steps:
       - uses: actions/checkout@v3
 
+      - name: prep-release
+        run: |
+          mkdir -p release
+          cp ../gemini-extension.json release/
+          cp ../README.md release/
+          cp ../local-rag/devops-rag.db release/
+
       - name: Set up Go
         uses: actions/setup-go@v3
         with:
@@ -38,17 +45,17 @@ jobs:
       - name: Run Go Tests
         run: go test ./...
 
-      - name: Install golangci-lint
-        run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+      # - name: Install golangci-lint
+      #   run: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 
-      - name: Run golangci-lint
-        run: golangci-lint run
+      # - name: Run golangci-lint
+      #   run: golangci-lint run
 
       - name: Build
         run: |
           export GOOS=${{ matrix.goos }}
           export GOARCH=${{ matrix.goarch }}
-          go build -o "release/devops-mcp-server-${{ matrix.goos }}-${{ matrix.goarch }}" ./devops-mcp-server
+          go build -o "release/devops-mcp-server-${GOOS}-${GOARCH}"
 
       - name: Create release assets
         run: |

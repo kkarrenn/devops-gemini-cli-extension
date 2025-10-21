@@ -19,10 +19,9 @@ import (
 	"log"
 	"os"
 	"path/filepath"
-	"runtime"
 
+	"cloud.google.com/go/auth/credentials"
 	chromem "github.com/philippgille/chromem-go"
-	"golang.org/x/oauth2/google"
 )
 
 // Source represents a data source to be fetched.
@@ -122,36 +121,6 @@ var KNOWLEDGE_RAG_SOURCES = []Source{
 	},
 }
 
-func uploadDirectoryToRag(collection *chromem.Collection, dir string) {
-	var docs []chromem.Document
-	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		if !info.IsDir() {
-			content, err := os.ReadFile(path)
-			if err != nil {
-				log.Printf("Error reading file %s: %v", path, err)
-				return nil
-			}
-			doc := chromem.Document{
-				ID:       path,
-				Content:  string(content),
-				Metadata: map[string]string{"source": path},
-			}
-			docs = append(docs, doc)
-		}
-		return nil
-	})
-
-	if len(docs) > 0 {
-		err := collection.AddDocuments(context.Background(), docs, runtime.NumCPU())
-		if err != nil {
-			log.Printf("Error adding documents from %s to collection: %v", dir, err)
-		}
-	}
-}
-
 func processSource(source Source, tmpDir string) {
 	sourceType := source.Type
 
@@ -178,34 +147,62 @@ func main() {
 	ctx := context.Background()
 
 	// Use Application Default Credentials to get a TokenSource
-	creds, err := google.FindDefaultCredentials(ctx)
+	scopes := []string{"https://www.googleapis.com/auth/cloud-platform"}
+	creds, err := credentials.DetectDefault(&credentials.DetectOptions{
+		Scopes: scopes,
+	})
 	if err != nil {
 		log.Fatalf("Failed to find default credentials: %v", err)
 	}
 
-	// Get an access token from the TokenSource
-	token, err := creds.TokenSource.Token()
+	projectID, err := creds.ProjectID(ctx)
 	if err != nil {
-		log.Fatalf("Failed to get access token: %v", err)
+		log.Fatalf("Failed to get project ID: %v", err)
+	}
+	if projectID == "" {
+		//Try quota project 
+		projectID, err = creds.QuotaProjectID(ctx)
+		if err != nil {
+			log.Fatalf("Failed to get project ID: %v", err)
+		}
+		if projectID == "" {
+			log.Fatalf(`
+			No Project ID found in Application Default Credentials. 
+			This can happen if credentials are user-based or the project hasn't been explicitly set 
+			e.g., via gcloud auth application-default set-quota-project.
+			Error:%v`, err)
+		}
+	}
+
+	// We need an access token
+	token, err := creds.TokenProvider.Token(ctx)
+	if err != nil {
+		log.Fatalf("Failed to retrieve access token: %v", err)
 	}
 
 	vertexEmbeddingFunc := chromem.NewEmbeddingFuncVertex(
-		token.AccessToken,
-		"haroonc-exp",
+		token.Value,
+		projectID,
 		chromem.EmbeddingModelVertexEnglishV4)
 	db := chromem.NewDB()
-	if len(os.Getenv("RAG_DB_PATH")) > 0 {
+	dbFile := os.Getenv("RAG_DB_PATH")
+	if len(dbFile) > 0 {
 		//check if file exists, only import if it does
-		if _, err := os.Stat(os.Getenv("RAG_DB_PATH")); os.IsNotExist(err) {
-			log.Printf("RAG_DB_PATH file does not exist, skipping import: %v", os.Getenv("RAG_DB_PATH"))
+		if _, err := os.Stat(dbFile); os.IsNotExist(err) {
+			log.Printf("RAG_DB_PATH file does not exist, skipping import: %v", dbFile)
 		}else{
-			err := db.ImportFromFile(os.Getenv("RAG_DB_PATH"), "")
+			err := db.ImportFromFile(dbFile, "")
+			log.Printf("Imported RAG with collections:%d",len(db.ListCollections()))
 			if err != nil {
-				log.Fatal(err)
+				log.Fatalf("Unable to import from the RAG DB file:%s - %v", dbFile, err)
 			}
 		}
 	}
-	collection, err := db.GetOrCreateCollection("devops-rag", nil, vertexEmbeddingFunc)
+	collectionKnowledge, err := db.GetOrCreateCollection("knowledge", nil, vertexEmbeddingFunc)
+	if err != nil {
+		log.Fatal(err)
+	}
+	collectionPattern, err := db.GetOrCreateCollection("pattern", nil, vertexEmbeddingFunc)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -217,32 +214,53 @@ func main() {
 	}
 
 	patternsDir := filepath.Join(pwd, "patterns")
-	uploadDirectoryToRag(collection, patternsDir)
+	addDirectoryToRag(ctx,collectionPattern, patternsDir)
 
 	knowledgeDir := filepath.Join(pwd, "knowledge")
-	uploadDirectoryToRag(collection, knowledgeDir)
+	addDirectoryToRag(ctx,collectionKnowledge, knowledgeDir)
 
 	// Create a temporary directory for downloads
-	tmpDir, err := os.MkdirTemp("", "rag-data-")
+	//tmpDir, err := os.MkdirTemp("", "rag-data-")
+	ragSourceDir,err := os.Getwd() 
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Unable to get working directory: %v",err)
 	}
-	defer os.RemoveAll(tmpDir)
-
-	// Process each data source
-	for _, source := range KNOWLEDGE_RAG_SOURCES {
-		processSource(source, tmpDir)
-	}
-
-	// Upload all files in the temporary directory to RAG
-	uploadDirectoryToRag(collection, tmpDir)
-
-	// Export the database to a file
-	if len(os.Getenv("RAG_DB_PATH")) > 0 {
-		err = db.ExportToFile(os.Getenv("RAG_DB_PATH"), true, "")
+	ragSourceDir = ragSourceDir + "/.rag-sources"
+	//Create dir if it does not exist
+	if fileStat, err := os.Stat(dbFile); os.IsNotExist(err) {
+		err = os.MkdirAll(ragSourceDir, 0755)
+		log.Printf("Dir created: %v", fileStat)
 		if err != nil {
 			log.Fatal(err)
 		}
-		log.Printf("Database exported to %s", os.Getenv("RAG_DB_PATH"))
+	}
+	//defer os.RemoveAll(tmpDir)
+
+	// Process data sources if destination is empty
+	// otherwise we assume last run was successful in 
+	// fetching sources
+	entries, err := os.ReadDir(ragSourceDir)
+	if err != nil {
+		log.Fatalf("Unable to read directory: %v",err)
+	}
+	if (len(entries)==0){
+		for _, source := range KNOWLEDGE_RAG_SOURCES {
+			processSource(source, ragSourceDir)
+		}
+	}
+
+	// Upload all files in the temporary directory to RAG
+	addDirectoryToRag(ctx,collectionKnowledge, ragSourceDir)
+
+	// Export the database to a file
+	if len(dbFile) > 0 {
+		log.Printf("Exporting database Knowledge base docs:%d, Pattern docs:%d", 
+					collectionKnowledge.Count(), 
+					collectionPattern.Count())
+		err = db.ExportToFile(dbFile, true, "")
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("Database exported to %s", dbFile)
 	}
 }

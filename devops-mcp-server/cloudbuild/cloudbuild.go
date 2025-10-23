@@ -36,6 +36,9 @@ type ProjectsLocationsTriggersServiceWrapper struct {
 	*cloudbuild.ProjectsLocationsTriggersService
 }
 
+type ListResult[T any] struct {
+	Items []T `json:"items"`
+}
 type triggersCreateCallWrapper struct {
 	*cloudbuild.ProjectsLocationsTriggersCreateCall
 }
@@ -89,7 +92,6 @@ func (w *ProjectsLocationsTriggersServiceWrapper) Run(name string, runbuildtrigg
 func (w *ProjectsLocationsTriggersServiceWrapper) List(parent string) cloudbuildiface.TriggersListCallAPI {
 	return &triggersListCallWrapper{w.ProjectsLocationsTriggersService.List(parent)}
 }
-
 
 // ProjectsLocationsBuildsServiceWrapper wraps cloudbuild.ProjectsLocationsBuildsService
 type ProjectsLocationsBuildsServiceWrapper struct {
@@ -219,13 +221,13 @@ func (c *Client) RunTrigger(ctx context.Context, projectID, location, triggerID 
 }
 
 // ListTriggers lists all Cloud Build triggers in a given location.
-func (c *Client) ListTriggers(ctx context.Context, projectID, location string) ([]*cloudbuild.BuildTrigger, error) {
+func (c *Client) ListTriggers(ctx context.Context, projectID, location string) (*ListResult[*cloudbuild.BuildTrigger], error) {
 	parent := fmt.Sprintf("projects/%s/locations/%s", projectID, location)
 	resp, err := c.triggersService.List(parent).Context(ctx).Do()
 	if err != nil {
 		return nil, fmt.Errorf("failed to list triggers: %v", err)
 	}
-	return resp.Triggers, nil
+	return &ListResult[*cloudbuild.BuildTrigger]{Items: resp.Triggers}, nil
 }
 
 // BuildContainer builds a container image using Cloud Build.

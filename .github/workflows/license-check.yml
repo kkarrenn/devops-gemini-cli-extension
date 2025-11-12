@@ -1,4 +1,3 @@
-#!/bin/sh
 # Copyright 2025 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,10 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-export RAG_DB_PATH=$(pwd)/devops-rag.db
-completed=60
-while [[ "$completed" != "18742" ]];do
-   completed=$(./local-rag 2>&1 | tee -a embedding.log | grep "Exporting database Knowledge base docs"|cut -d: -f4 | cut -d, -f1)
-   echo Docs done $completed
-   sleep 65
-done
+name: License
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+jobs:
+  license-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+
+      - name: Set up Go
+        uses: actions/setup-go@44694675825211faa026b3c33043df3e48a5fa00
+        with:
+          go-version: 1.24.8
+
+      - name: Check
+        # NOTE: Keep in sync with .hooks/addlicense
+        run: go run github.com/google/addlicense@v1.2.0 -v -check -s=only .

@@ -15,11 +15,13 @@
 package rag
 
 import (
+	"bytes"
 	"context"
 	"devops-mcp-server/auth"
+	_ "embed"
+	"encoding/json"
 	"fmt"
 	"log"
-	"os"
 	"sync"
 
 	chromem "github.com/philippgille/chromem-go"
@@ -27,10 +29,8 @@ import (
 
 var initOnce sync.Once
 
-// ListResult defines a generic struct to wrap a list of items.
-type ListResult[T any] struct {
-	Items []T `json:"items"`
-}
+//go:embed devops-rag.db
+var embeddedDB []byte
 
 type RagData struct {
 	DB        *chromem.DB
@@ -38,29 +38,25 @@ type RagData struct {
 	Knowledge *chromem.Collection
 }
 
+// Only expose what the LLM needs to read.
+type Result struct {
+	Content    string            `json:"content"`
+	Metadata   map[string]string `json:"metadata,omitempty"` // Source info
+	Similarity float32           `json:"relevance_score"`    // Helps LLM weigh confidence
+}
+
 var RagDB RagData
 
 // loadRAG performs the one-time initialization.
 func loadRAG(ctx context.Context) error {
-	dbFile := os.Getenv("RAG_DB_PATH")
 	RagDB = RagData{DB: chromem.NewDB()}
-	if len(dbFile) < 1 {
-		// RETURN AN ERROR
-		return fmt.Errorf("Env variable RAG_DB_PATH is not set for RAG data file")
-	}
-
-	//check if file exists
-	if _, err := os.Stat(dbFile); os.IsNotExist(err) {
-		// RETURN AN ERROR
-		return fmt.Errorf("RAG_DB_PATH file does not exist, skipping import: %v", dbFile)
-	}
-
-	err := RagDB.DB.ImportFromFile(dbFile, "")
+	reader := bytes.NewReader(embeddedDB)
+	err := RagDB.DB.ImportFromReader(reader, "")
 	if err != nil {
-		log.Printf("Unable to import from the RAG DB file:%s - %v", dbFile, err)
-		// This seems non-fatal based on your log, so we continue.
+		log.Printf("Unable to import from the RAG DB file: %v", err)
+		return err
 	}
-	log.Printf("IMPORTED from the RAG DB file:%s - %v", dbFile, len(RagDB.DB.ListCollections()))
+	log.Printf("IMPORTED from the RAG DB collections: %v", len(RagDB.DB.ListCollections()))
 
 	creds, err := auth.GetAuthToken(ctx)
 	if err != nil {
@@ -73,20 +69,16 @@ func loadRAG(ctx context.Context) error {
 		creds.Token,
 		creds.ProjectId,
 		chromem.EmbeddingModelVertexEnglishV4)
-
+	RagDB.Knowledge, err = RagDB.DB.GetOrCreateCollection("knowledge", nil, vertexEmbeddingFunc)
+	if err != nil {
+		return fmt.Errorf("Unable to get collection knowledge: %w", err)
+	}
+	log.Printf("LOADED collection knowledge: %v", RagDB.Pattern.Count())
 	RagDB.Pattern, err = RagDB.DB.GetOrCreateCollection("pattern", nil, vertexEmbeddingFunc)
 	if err != nil {
-		// RETURN AN ERROR
 		return fmt.Errorf("Unable to get collection pattern: %w", err)
 	}
 	log.Printf("LOADED collection pattern: %v", RagDB.Pattern.Count())
-
-	RagDB.Knowledge, err = RagDB.DB.GetOrCreateCollection("knowledge", nil, vertexEmbeddingFunc)
-	if err != nil {
-		// RETURN AN ERROR
-		return fmt.Errorf("Unable to get collection knowledge: %w", err)
-	}
-	log.Printf("LOADED collection knowledge: %v", RagDB.Knowledge.Count())
 
 	log.Print("RAG Init Completed!")
 	return nil // Success
@@ -104,34 +96,46 @@ func GetRAG(ctx context.Context) (RagData, error) {
 	return RagDB, initErr
 }
 
-func QueryKnowledge(ctx context.Context, query string) (*ListResult[chromem.Result], error) {
-	ragDB, err := GetRAG(ctx)
-	if err != nil {
-		// Initialization failed, return the error.
-		return nil, fmt.Errorf("RAG system not initialized: %w", err)
-	}
-	if ragDB.Knowledge == nil {
-		return nil, fmt.Errorf("RagDB does not contain Knowledge collection, among %d collections", len(RagDB.DB.ListCollections()))
-	}
-	result, err := RagDB.Knowledge.Query(ctx, query, 3, nil, nil)
+func (r *RagData) QueryPattern(ctx context.Context, query string) (string, error) {
+	results, err := r.Pattern.Query(ctx, query, 2, nil, nil)
 	if err != nil {
 		log.Fatalf("Unable to Query collection pattern: %v", err)
 	}
-	return &ListResult[chromem.Result]{Items: result}, nil
+	cleanResults := make([]Result, len(results))
+	for i, r := range results {
+		cleanResults[i] = Result{
+			Content:    r.Content,
+			Metadata:   r.Metadata,
+			Similarity: r.Similarity,
+		}
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(cleanResults)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal results: %w", err)
+	}
+	return string(jsonData), nil
 }
 
-func QueryPattern(ctx context.Context, query string) (*ListResult[chromem.Result], error) {
-	ragDB, err := GetRAG(ctx)
+func (r *RagData) Queryknowledge(ctx context.Context, query string) (string, error) {
+	results, err := r.Knowledge.Query(ctx, query, 2, nil, nil)
 	if err != nil {
-		// Initialization failed, return the error.
-		return nil, fmt.Errorf("RAG system not initialized: %w", err)
+		log.Fatalf("Unable to Query collection knowledge: %v", err)
 	}
-	if ragDB.Pattern == nil {
-		return nil, fmt.Errorf("RagDB does not contain Pattern collection, among %d collections", len(RagDB.DB.ListCollections()))
+	cleanResults := make([]Result, len(results))
+	for i, r := range results {
+		cleanResults[i] = Result{
+			Content:    r.Content,
+			Metadata:   r.Metadata,
+			Similarity: r.Similarity,
+		}
 	}
-	result, err := RagDB.Pattern.Query(ctx, query, 2, nil, nil)
+
+	// Marshal to JSON
+	jsonData, err := json.Marshal(cleanResults)
 	if err != nil {
-		log.Fatalf("Unable to Query collection pattern: %v", err)
+		return "", fmt.Errorf("failed to marshal results: %w", err)
 	}
-	return &ListResult[chromem.Result]{Items: result}, nil
+	return string(jsonData), nil
 }

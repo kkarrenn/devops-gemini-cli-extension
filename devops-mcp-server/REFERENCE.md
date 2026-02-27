@@ -46,6 +46,48 @@ Runs a Cloud Build trigger.
 - `tag` (string, optional): The tag to run the trigger at (regex).
 - `commit_sha` (string, optional): The exact commit SHA to run the trigger at.
 
+## Cloud Deploy
+
+### `clouddeploy.list_delivery_pipelines`
+Lists the Cloud Deploy delivery pipelines in a specified GCP project and location.
+
+**Arguments:**
+- `project_id` (string, required): The Google Cloud project ID.
+- `location` (string, required): The Google Cloud location.
+
+### `clouddeploy.list_targets`
+Lists the Cloud Deploy targets in a specified GCP project and location.
+
+**Arguments:**
+- `project_id` (string, required): The Google Cloud project ID.
+- `location` (string, required): The Google Cloud location.
+
+### `clouddeploy.list_releases`
+Lists the Cloud Deploy releases for a specified pipeline.
+
+**Arguments:**
+- `project_id` (string, required): The Google Cloud project ID.
+- `location` (string, required): The Google Cloud location.
+- `pipeline_id` (string, required): The Delivery Pipeline ID.
+
+### `clouddeploy.list_rollouts`
+Lists the Cloud Deploy rollouts for a specified release.
+
+**Arguments:**
+- `project_id` (string, required): The Google Cloud project ID.
+- `location` (string, required): The Google Cloud location.
+- `pipeline_id` (string, required): The Delivery Pipeline ID.
+- `release_id` (string, required): The Release ID.
+
+### `clouddeploy.create_release`
+Creates a new Cloud Deploy release for a specified delivery pipeline.
+
+**Arguments:**
+- `project_id` (string, required): The Google Cloud project ID.
+- `location` (string, required): The Google Cloud location.
+- `pipeline_id` (string, required): The Delivery Pipeline ID.
+- `release_id` (string, required): The ID of the release to create.
+
 ## Cloud Run
 
 ### `cloudrun.list_services`

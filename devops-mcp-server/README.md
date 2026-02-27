@@ -8,6 +8,7 @@ The Google Cloud DevOps MCP Server provides a suite of tools for:
 
 *   **Artifact Registry:** Setting up and managing repositories.
 *   **Cloud Build:** Managing and running build triggers.
+*   **Cloud Deploy:** Managing delivery pipelines, targets, releases, and rollouts.
 *   **Cloud Run:** Deploying and managing services from images or source.
 *   **Cloud Storage:** Managing buckets and uploading source code.
 *   **Developer Connect:** Establishing connections to git repositories.
